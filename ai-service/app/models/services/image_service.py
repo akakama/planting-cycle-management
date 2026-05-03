@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 import io
-import os
+from pathlib import Path
 from app.models.schemas.image import DiagnosisResult
 from app.config import config
 
@@ -23,6 +23,7 @@ class ImageRecognitionService:
             # 设置设备（优先GPU，自动降级到CPU）
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             print(f"图像识别使用设备: {self.device}")
+            self.service_root = Path(__file__).resolve().parents[3]
             
             # 检查模型文件
             model_candidates = [
@@ -37,8 +38,9 @@ class ImageRecognitionService:
             self.model_path = None
             
             for model_path in model_candidates:
-                if os.path.exists(model_path):
-                    print(f"尝试加载模型: {model_path}")
+                resolved_model_path = self._resolve_model_path(model_path)
+                if resolved_model_path.exists():
+                    print(f"尝试加载模型: {resolved_model_path}")
                     try:
                         from torchvision import models as tv_models
                         import torch.nn as nn
@@ -50,14 +52,14 @@ class ImageRecognitionService:
                             num_classes
                         )
                         
-                        state_dict = torch.load(model_path, map_location=self.device)
+                        state_dict = torch.load(resolved_model_path, map_location=self.device)
                         base_model.load_state_dict(state_dict)
                         base_model.to(self.device)
                         base_model.eval()
                         
                         self.model = base_model
-                        self.model_path = model_path
-                        print(f"✓ 模型加载成功: {model_path}")
+                        self.model_path = str(resolved_model_path)
+                        print(f"✓ 模型加载成功: {resolved_model_path}")
                         break
                     except Exception as e:
                         print(f"✗ 加载失败: {e}")
@@ -80,6 +82,17 @@ class ImageRecognitionService:
         except Exception as e:
             print(f"图像识别服务初始化失败: {str(e)}")
             self.model = None
+
+    def _resolve_model_path(self, model_path: str) -> Path:
+        """Resolve model paths relative to the ai-service directory."""
+        path = Path(model_path)
+        if path.is_absolute():
+            return path
+
+        if path.parts and path.parts[0] == "ai-service":
+            return self.service_root.parent / path
+
+        return self.service_root / path
 
     def _load_class_mapping(self) -> Dict[int, Dict]:
         """加载病虫害类别映射"""

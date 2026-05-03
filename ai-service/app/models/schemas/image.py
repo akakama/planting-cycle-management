@@ -29,6 +29,7 @@ class DiagnoseResponse(BaseModel):
     """诊断响应模型（匹配后端期望格式）"""
     pestName: str = Field(..., description="病虫害名称")
     pestType: str = Field(default="病害", description="病虫害类型")
+    cropType: str = Field(default="", description="作物类型")
     symptoms: str = Field(default="", description="症状")
     treatmentMethods: str = Field(..., description="治疗方法")
     preventionMethods: str = Field(default="", description="预防方法")

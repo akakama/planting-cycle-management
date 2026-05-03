@@ -31,11 +31,12 @@
         <el-descriptions-item label="置信度">
           <div class="confidence-container">
             <el-progress
-              :percentage="result.confidence"
+              :percentage="getConfidencePercentage(result.confidence)"
               :color="getConfidenceColor(result.confidence)"
               :stroke-width="20"
+              :show-text="false"
             />
-            <span class="confidence-value">{{ result.confidence }}%</span>
+            <span class="confidence-value">{{ formatConfidence(result.confidence) }}%</span>
           </div>
         </el-descriptions-item>
 
@@ -115,8 +116,6 @@
 </template>
 
 <script setup>
-import { ElMessage } from 'element-plus'
-
 const props = defineProps({
   result: {
     type: Object,
@@ -126,10 +125,21 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'edit', 'cancel', 'retry', 'manual-input'])
 
+const getConfidencePercentage = (confidence) => {
+  const value = Number(confidence)
+  if (Number.isNaN(value)) return 0
+  return Math.min(100, Math.max(0, value))
+}
+
+const formatConfidence = (confidence) => {
+  return getConfidencePercentage(confidence).toFixed(2)
+}
+
 // 根据置信度返回颜色
 const getConfidenceColor = (confidence) => {
-  if (confidence >= 80) return '#67c23a' // 绿色
-  if (confidence >= 60) return '#e6a23c' // 橙色
+  const value = getConfidencePercentage(confidence)
+  if (value >= 80) return '#67c23a' // 绿色
+  if (value >= 60) return '#e6a23c' // 橙色
   return '#f56c6c' // 红色
 }
 

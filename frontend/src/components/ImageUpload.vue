@@ -39,7 +39,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -60,7 +60,7 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const imageUrl = ref(props.modelValue)
 
-// 自定义上传方法（使用本地预览作为降级方案）
+// 自定义上传方法：读取为 data URL，后续可直接提取 Base64 调用识别接口。
 const customUpload = (options) => {
   const { file, onProgress, onSuccess, onError } = options
 
@@ -81,45 +81,38 @@ const customUpload = (options) => {
 
   uploading.value = true
 
-  // 使用本地预览作为降级方案
-  try {
-    // 创建本地预览URL
-    const localUrl = URL.createObjectURL(file)
-    
-    // 模拟上传进度
-    let progress = 0
-    const interval = setInterval(() => {
-      progress += 10
-      onProgress({ percent: progress }, file)
-      
-      if (progress >= 100) {
-        clearInterval(interval)
-        uploading.value = false
-        
-        // 使用本地URL作为降级方案
-        imageUrl.value = localUrl
-        emit('update:modelValue', localUrl)
-        emit('success', {
-          url: localUrl,
-          filename: file.name,
-          size: file.size
-        })
-        
-        ElMessage.success('图片上传成功（本地预览模式）')
-        onSuccess({
-          code: 200,
-          data: {
-            url: localUrl,
-            filename: file.name
-          }
-        })
-      }
-    }, 100)
-  } catch (error) {
-    uploading.value = false
-    ElMessage.error('图片处理失败')
-    onError(error)
+  const reader = new FileReader()
+
+  reader.onprogress = (event) => {
+    if (event.lengthComputable) {
+      onProgress({ percent: Math.round((event.loaded / event.total) * 100) }, file)
+    }
   }
+
+  reader.onload = () => {
+    uploading.value = false
+    uploadProgress.value = 100
+
+    const dataUrl = reader.result
+
+    ElMessage.success('图片读取成功')
+    onSuccess({
+      code: 200,
+      data: {
+        url: dataUrl,
+        filename: file.name
+      }
+    })
+  }
+
+  reader.onerror = () => {
+    uploading.value = false
+    uploadProgress.value = 0
+    ElMessage.error('图片读取失败')
+    onError(reader.error || new Error('图片读取失败'))
+  }
+
+  reader.readAsDataURL(file)
 }
 
 // 上传前验证
@@ -143,7 +136,14 @@ const beforeUpload = (file) => {
 
 // 上传进度
 const handleProgress = (event) => {
-  uploadProgress.value = Math.floor((event.loaded / event.total) * 100)
+  if (typeof event.percent === 'number') {
+    uploadProgress.value = Math.floor(event.percent)
+    return
+  }
+
+  if (event.total) {
+    uploadProgress.value = Math.floor((event.loaded / event.total) * 100)
+  }
 }
 
 // 上传成功
@@ -183,7 +183,6 @@ watch(() => props.modelValue, (newVal) => {
 </script>
 
 <script>
-import { watch } from 'vue'
 export default {
   name: 'ImageUpload'
 }

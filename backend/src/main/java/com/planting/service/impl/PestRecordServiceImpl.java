@@ -15,6 +15,8 @@ import com.planting.mapper.PlantingPlanMapper;
 import com.planting.service.PestRecordService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -31,10 +33,11 @@ import java.util.stream.Collectors;
 public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRecord>
         implements PestRecordService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${ai.service.url:http://localhost:8000}")
+    private String aiServiceUrl;
 
-    // AI服务图像识别接口地址
-    private static final String AI_SERVICE_URL = "http://localhost:8000/api/image/diagnose";
+    @Value("${ai.service.timeout:30000}")
+    private int aiServiceTimeout;
 
     @Autowired
     private PestKnowledgeMapper pestKnowledgeMapper;
@@ -92,12 +95,23 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
 
     @Override
     public DiagnoseResponse diagnose(DiagnoseRequest request) {
+        if (request == null) {
+            throw new BusinessException("诊断请求不能为空");
+        }
+
         log.info("调用病虫害诊断服务，种植计划ID: {}", request.getPlanId());
 
-        // 获取种植计划信息
-        PlantingPlan plan = plantingPlanMapper.selectById(request.getPlanId());
-        if (plan == null) {
-            throw new BusinessException("种植计划不存在");
+        if (request.getImageBase64() == null || request.getImageBase64().isBlank()) {
+            throw new BusinessException("图片不能为空");
+        }
+
+        // 获取种植计划信息。图片识别本身不依赖计划，计划缺失时继续调用AI模型。
+        PlantingPlan plan = null;
+        if (request.getPlanId() != null) {
+            plan = plantingPlanMapper.selectById(request.getPlanId());
+            if (plan == null) {
+                log.warn("种植计划不存在，仍继续执行图片识别，种植计划ID: {}", request.getPlanId());
+            }
         }
 
         DiagnoseResponse aiResponse = null;
@@ -105,8 +119,9 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
 
         // 尝试调用AI诊断服务
         try {
-            aiResponse = restTemplate.postForObject(
-                    AI_SERVICE_URL,
+            String diagnoseUrl = aiServiceUrl.replaceAll("/+$", "") + "/api/image/diagnose";
+            aiResponse = createAiRestTemplate().postForObject(
+                    diagnoseUrl,
                     request,
                     DiagnoseResponse.class
             );
@@ -120,13 +135,17 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
             log.warn("AI诊断服务调用失败: {}，使用本地知识库", e.getMessage());
         }
 
-        // 使用本地知识库进行匹配
+        // 使用本地知识库作为AI服务不可用时的兜底
         DiagnoseResponse knowledgeResponse = matchWithKnowledgeBase(request, plan);
 
         // 混合识别结果
-        DiagnoseResponse finalResponse = combineResults(aiResponse, knowledgeResponse, aiConfidence);
+        DiagnoseResponse finalResponse = combineResults(aiResponse, knowledgeResponse);
 
         // 验证置信度
+        if (finalResponse.getConfidence() == null) {
+            finalResponse.setConfidence(0.0);
+        }
+
         boolean highConfidence = finalResponse.getConfidence() > 70.0; // 降低阈值从78%到70%
         finalResponse.setHighConfidence(highConfidence);
 
@@ -147,13 +166,17 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
             return createDefaultResponse();
         }
 
+        List<PestKnowledge> relevantKnowledge = allKnowledge;
+
         // 根据种植计划的作物类型筛选相关知识
-        String cropType = getCropType(plan.getCropId());
-        List<PestKnowledge> relevantKnowledge = allKnowledge.stream()
-                .filter(k -> k.getAffectedCrops() != null && 
-                           (k.getAffectedCrops().contains("全部") || 
-                            k.getAffectedCrops().contains(cropType)))
-                .collect(Collectors.toList());
+        if (plan != null) {
+            String cropType = getCropType(plan.getCropId());
+            relevantKnowledge = allKnowledge.stream()
+                    .filter(k -> k.getAffectedCrops() != null &&
+                            (k.getAffectedCrops().contains("全部") ||
+                                    k.getAffectedCrops().contains(cropType)))
+                    .collect(Collectors.toList());
+        }
 
         if (relevantKnowledge.isEmpty()) {
             // 如果没有特定作物的知识，使用所有知识
@@ -189,6 +212,7 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
         DiagnoseResponse response = new DiagnoseResponse();
         response.setPestName(knowledge.getPestName());
         response.setPestType(knowledge.getPestType());
+        response.setCropType(resolveCropType(knowledge));
         response.setSymptoms(knowledge.getSymptoms());
         response.setTreatmentMethods(knowledge.getTreatmentMethods());
         response.setPreventionMethods(knowledge.getPreventionMethods());
@@ -206,6 +230,7 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
         DiagnoseResponse response = new DiagnoseResponse();
         response.setPestName("未知病虫害");
         response.setPestType("待识别");
+        response.setCropType("");
         response.setSymptoms("无法识别具体病虫害类型，建议人工诊断");
         response.setTreatmentMethods("建议联系专业农技人员进行诊断");
         response.setPreventionMethods("加强田间管理，定期检查");
@@ -215,37 +240,63 @@ public class PestRecordServiceImpl extends ServiceImpl<PestRecordMapper, PestRec
         return response;
     }
 
+    private String resolveCropType(PestKnowledge knowledge) {
+        if (knowledge == null) {
+            return "";
+        }
+
+        if (knowledge.getAffectedCrops() != null && !knowledge.getAffectedCrops().isBlank()) {
+            return knowledge.getAffectedCrops().split("[,，、]")[0].trim();
+        }
+
+        return inferCropTypeFromName(knowledge.getPestName());
+    }
+
+    private String inferCropTypeFromName(String pestName) {
+        if (pestName == null) {
+            return "";
+        }
+
+        if (pestName.contains("小麦") || pestName.contains("麦")) {
+            return "小麦";
+        }
+        if (pestName.contains("水稻") || pestName.contains("稻")) {
+            return "水稻";
+        }
+        if (pestName.contains("玉米")) {
+            return "玉米";
+        }
+        if (pestName.contains("大豆")) {
+            return "大豆";
+        }
+        if (pestName.contains("马铃薯")) {
+            return "马铃薯";
+        }
+        if (pestName.contains("番茄")) {
+            return "番茄";
+        }
+
+        return "";
+    }
+
     /**
      * 混合AI和知识库的结果
      */
-    private DiagnoseResponse combineResults(DiagnoseResponse aiResponse, 
-                                           DiagnoseResponse knowledgeResponse, 
-                                           double aiConfidence) {
+    private DiagnoseResponse combineResults(DiagnoseResponse aiResponse,
+                                           DiagnoseResponse knowledgeResponse) {
         if (aiResponse == null) {
             return knowledgeResponse;
         }
 
-        if (aiConfidence >= 85.0) {
-            // AI置信度很高，直接使用AI结果
-            return aiResponse;
-        } else if (aiConfidence >= 70.0) {
-            // AI置信度中等，结合知识库信息
-            if (knowledgeResponse != null && knowledgeResponse.getConfidence() > 80.0) {
-                // 知识库置信度也很高，使用知识库结果
-                return knowledgeResponse;
-            }
-            // 否则使用AI结果，但降低置信度
-            aiResponse.setConfidence(Math.max(aiConfidence, knowledgeResponse.getConfidence()));
-            return aiResponse;
-        } else {
-            // AI置信度低，主要依赖知识库
-            if (knowledgeResponse != null) {
-                return knowledgeResponse;
-            }
-            // 如果知识库也没有结果，使用AI结果但标记为低置信度
-            aiResponse.setConfidence(Math.max(aiConfidence, 60.0));
-            return aiResponse;
-        }
+        // 真实图片模型结果优先。知识库匹配没有读取图像，只作为AI服务不可用时的兜底。
+        return aiResponse;
+    }
+
+    private RestTemplate createAiRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(aiServiceTimeout);
+        factory.setReadTimeout(aiServiceTimeout);
+        return new RestTemplate(factory);
     }
 
     /**
