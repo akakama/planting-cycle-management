@@ -1,0 +1,8 @@
+{
+    "diffEditor.renderSideBySide": false,
+    "java.compile.nullAnalysis.mode": "automatic",
+    "maven.view": "flat",
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "clawMode.mode": "editor",
+    "workbench.activityBar.location": "default"
+}

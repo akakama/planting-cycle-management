@@ -1,0 +1,8 @@
+{
+  "total_images": 1000,
+  "correct_predictions": 23,
+  "accuracy": 2.3,
+  "num_classes": 38,
+  "model": "MobileNetV3-Large",
+  "dataset": "PlantVillage (真实图片)"
+}
