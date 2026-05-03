@@ -18,6 +18,8 @@ public class DiagnoseResponse {
 
     private String pestType;
 
+    private String cropType;
+
     private String symptoms;
 
     private String treatmentMethods;

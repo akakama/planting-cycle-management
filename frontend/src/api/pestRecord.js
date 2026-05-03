@@ -13,12 +13,11 @@ export const pestRecordApi = {
   delete(id) {
     return request({ url: `/pest-records/${id}`, method: 'delete' })
   },
-  diagnose(formData) {
+  diagnose(data) {
     return request({
       url: '/pest-records/diagnose',
       method: 'post',
-      data: formData,
-      headers: { 'Content-Type': 'multipart/form-data' }
+      data
     })
   }
 }

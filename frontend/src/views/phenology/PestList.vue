@@ -111,13 +111,35 @@ import { ElMessage } from 'element-plus'
 import { Picture } from '@element-plus/icons-vue'
 import ImageUpload from '@/components/ImageUpload.vue'
 import IdentifyResult from '@/components/IdentifyResult.vue'
-import axios from 'axios'
-import { extractEnhancedFeatures, matchWithKnowledgeBase, evaluateEnhancedRelevance } from '@/utils/featureExtraction'
+import { pestRecordApi } from '@/api/pestRecord'
+import { extractEnhancedFeatures, evaluateEnhancedRelevance } from '@/utils/featureExtraction'
 
 // 响应式数据
 const imageUrl = ref('')
 const identifying = ref(false)
 const identifyResult = ref(null)
+
+const inferCropFromDiseaseName = (diseaseName = '') => {
+  const cropMap = [
+    ['苹果', '苹果'], ['Apple', '苹果'],
+    ['蓝莓', '蓝莓'], ['Blueberry', '蓝莓'],
+    ['樱桃', '樱桃'], ['Cherry', '樱桃'],
+    ['玉米', '玉米'], ['Corn', '玉米'],
+    ['葡萄', '葡萄'], ['Grape', '葡萄'],
+    ['柑橘', '柑橘'], ['Orange', '柑橘'],
+    ['马铃薯', '马铃薯'], ['Potato', '马铃薯'],
+    ['辣椒', '辣椒'], ['Pepper', '辣椒'],
+    ['番茄', '番茄'], ['Tomato', '番茄'],
+    ['草莓', '草莓'], ['Strawberry', '草莓'],
+    ['大豆', '大豆'], ['Soybean', '大豆'],
+    ['水稻', '水稻'], ['稻', '水稻'],
+    ['小麦', '小麦'], ['麦', '小麦'],
+    ['桃', '桃'], ['Peach', '桃']
+  ]
+
+  const matched = cropMap.find(([marker]) => diseaseName.includes(marker))
+  return matched ? matched[1] : ''
+}
 
 // 图片上传成功
 const handleImageUploadSuccess = (fileInfo) => {
@@ -145,20 +167,14 @@ const handleIdentify = async () => {
     // 获取当前种植计划ID（默认1）
     const planId = 1
     
-    // 调用后端识别接口 → 后端调用AI服务 → MobileNetV3模型
-    const token = localStorage.getItem('token')
-    const response = await axios.post('/api/pest-records/diagnose', {
+    // 调用后端识别接口 -> 后端调用AI服务 -> MobileNetV3模型
+    const response = await pestRecordApi.diagnose({
       planId: planId,
       imageBase64: imageBase64
-    }, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
     })
 
-    if (response.data.code === 200) {
-      const data = response.data.data
+    if (response.code === 200) {
+      const data = response.data
       identifyResult.value = {
         success: true,
         diseaseName: data.pestName || '未知病虫害',
@@ -167,7 +183,7 @@ const handleIdentify = async () => {
         preventionAdvice: data.preventionMethods || '',
         severity: data.severity || '未知',
         type: data.pestType || '病害',
-        crop: data.cropType || '',
+        crop: data.cropType || inferCropFromDiseaseName(data.pestName),
         highConfidence: data.highConfidence || false,
         additionalInfo: data.highConfidence 
           ? '深度学习模型识别 - MobileNetV3 (PlantVillage 38类)' 
@@ -177,7 +193,7 @@ const handleIdentify = async () => {
     } else {
       identifyResult.value = {
         success: false,
-        message: response.data.message || '识别失败'
+        message: response.message || '识别失败'
       }
       ElMessage.error('识别失败')
     }
