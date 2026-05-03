@@ -14,7 +14,11 @@ target/
 .vscode/
 .idea/
 *.iml
-ai-service/models/*.pth
+ai-service/models/mobilenetv3.pth
+ai-service/models/mobilenetv3_finetuned.pth
+ai-service/models/mobilenetv3_gpu_trained.pth
+ai-service/models/mobilenetv3_plantvillage.pth
+ai-service/models/mobilenetv3_plantvillage_best.pth
 ai-service/models/*.onnx
 backend/logs/
 frontend/node_modules/
@@ -28,5 +32,4 @@ backend/*.trace.db
 .agents/
 data/
 *.tar.gz
-*.pth
 *.onnx
